@@ -17,4 +17,3 @@ app.use(cors())
 require('./routes')(app);
 
 exports.auth = functions.region('asia-southeast1').https.onRequest(app);
-
