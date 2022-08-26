@@ -16,6 +16,7 @@ module.exports = {
 
     // Login
     async handleLogin(req, res) {
+        const cookies = req.cookies;
         const { username, password } = req.body
         if (!username || !password) return res.status(400).json({ 'message': 'Username and password are required' })
 
@@ -42,15 +43,22 @@ module.exports = {
                 { expiresIn: '1h' }
             )
             //refreshToken
-            const refreshToken = jwt.sign(
+            const newRefreshToken = jwt.sign(
                 { "username": user.username },
                 process.env.REFRESH_TOKEN_SECRET,
-                { expiresIn: '1d' }
+                { expiresIn: '1d' } 
             )
+            const newRefreshTokenArray = 
+              !cookies?.jwt
+                ? user.refreshToken
+                : user.refreshToken.filter(rt => rt !== cookies.jwt);
+            
+            if(cookies?.jwt) res.clearCookie('jwt', { httpOnly: true/*, secure: true*/, sameSite: 'None'})
+
             //Saving refreshToken with current user
-            await User.doc(user.id).update({ "refreshToken": refreshToken })
-            res.cookie('jwt', refreshToken, { httpOnly: true, secure: true, maxAge: 24 * 60 * 60 * 1000 })
-            res.json({ accessToken })
+            await User.doc(user.id).update({ "refreshToken": [...newRefreshTokenArray,newRefreshToken] })
+            res.cookie('jwt', newRefreshToken, { httpOnly: true/*, secure: true*/, maxAge: 24 * 60 * 60 * 1000 })
+            res.json({ roles,accessToken })
         } else {
             return res.sendStatus(401)
         }
@@ -63,18 +71,18 @@ module.exports = {
       const refreshToken = cookies.jwt;
     
       //Is refreshToken in db?
-      const users = await User.where("refreshToken", "==", refreshToken).get().then((querySnapshot) => {
+      const users = await User.where("refreshToken", 'array-contains', refreshToken).get().then((querySnapshot) => {
         return querySnapshot.docs.map(doc => Object.assign(doc.data(), { id: doc.id }))
       });
       if (users.length <= 0) {
-        res.clearCookie('jwt', { httpOnly: true, secure: true, maxAge: 24 * 60 * 60 * 1000 })
+        res.clearCookie('jwt', { httpOnly: true/*, secure: true*/, sameSite: 'None'})
         return res.sendStatus(204) //No content
       }
       const user = users[0];
 
       // Delete refreshToken in db
-      await User.doc(user.id).update({ "refreshToken": '' })
-      res.clearCookie('jwt', { httpOnly: true, secure: true, maxAge: 24 * 60 * 60 * 1000 }) // secure: true - only serves on https
+      await User.doc(user.id).update({ "refreshToken": user.refreshToken.filter(rt => rt !== refreshToken) })
+      res.clearCookie('jwt', { httpOnly: true/*, secure: true*/, sameSite: 'None'}) // secure: true - only serves on https
       res.sendStatus(204)
     },
 
@@ -83,19 +91,49 @@ module.exports = {
       const cookies = req.cookies
       if(!cookies?.jwt) return res.sendStatus(401);
       const refreshToken = cookies.jwt;
+      res.clearCookie('jwt', { httpOnly: true/*, secure: true*/, sameSite: 'None' })
     
-      const users = await User.where("refreshToken", "==", refreshToken).get().then((querySnapshot) => {
+      const users = await User.where("refreshToken", 'array-contains', refreshToken).get().then((querySnapshot) => {
         return querySnapshot.docs.map(doc => Object.assign(doc.data(), { id: doc.id }))
       });
-      if (users.length <= 0) return res.sendStatus(403) // Unauthorized
+
+      // Detected refresh token reuse!
+      if (users.length <= 0){
+        jwt.verify(
+          refreshToken,
+          process.env.REFRESH_TOKEN_SECRET,
+          async (err,decoded) => {
+            if(err) return res.sendStatus(403); //Forbidden
+            console.log('attempted refresh token reuse!')
+            const hackedUser = await User.where("username", "==", decoded.username).get().then((querySnapshot) => {
+              return querySnapshot.docs.map(doc => Object.assign(doc.data(), { id: doc.id }))
+            });
+            if(hackedUser.length <= 0){
+              await User.doc(hackedUser[0].id).update({ "refreshToken": [] })
+            }
+          }
+        )
+        return res.sendStatus(403) //Forbidden
+      }
+
+      const user = users[0];
+
+      const newRefreshTokenArray =  user.refreshToken.filter(rt => rt !== refreshToken);
     
       // evaluate jwt
-      const user = users[0];
+      
       jwt.verify(
         refreshToken,
         process.env.REFRESH_TOKEN_SECRET,
-        (err,decoded) => {
+        async (err,decoded) => {
+          if(err){
+            console.log('expired refresh token')
+            await User.doc(user.id).update({ "refreshToken": [...newRefreshTokenArray] })
+          }
           if(err || user.username !== decoded.username) return res.sendStatus(403);
+
+          //Refresh token was still valid
+
           const roles = Object.values(user.roles);
           const accessToken = jwt.sign(
             { "UserInfo": 
@@ -107,7 +145,15 @@ module.exports = {
             process.env.ACCESS_TOKEN_SECRET,
             { expiresIn: '5m' }
           )
-          res.json({ accessToken })
+          const newRefreshToken = jwt.sign(
+              { "username": user.username },
+              process.env.REFRESH_TOKEN_SECRET,
+              { expiresIn: '1d' }
+          )
+          //Saving refreshToken with current user
+          await User.doc(user.id).update({ "refreshToken": [...newRefreshTokenArray, newRefreshToken] })
+          res.cookie('jwt', newRefreshToken, { httpOnly: true/*, secure: true*/, maxAge: 24 * 60 * 60 * 1000 })
+          res.json({ roles,accessToken })
         }
       )
     },
@@ -127,7 +173,8 @@ module.exports = {
         await User.add({
           "username": username,
           "roles": {"User": 2001},
-          "password": hashedPwd
+          "password": hashedPwd,
+          "refreshToken" : []
         });
         res.send({'success': `New user ${username} created!`})
     } catch (err) {
