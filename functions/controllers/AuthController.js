@@ -40,7 +40,7 @@ module.exports = {
                   }
                 },
                 process.env.ACCESS_TOKEN_SECRET,
-                { expiresIn: '1h' }
+                { expiresIn: '1m' }
             )
             //refreshToken
             const newRefreshToken = jwt.sign(
@@ -53,12 +53,13 @@ module.exports = {
                 ? user.refreshToken
                 : user.refreshToken.filter(rt => rt !== cookies.jwt);
             
-            if(cookies?.jwt) res.clearCookie('jwt', { httpOnly: true/*, secure: true*/, sameSite: 'None'})
+            if(cookies?.jwt) res.clearCookie('jwt', { httpOnly: true, secure: true, sameSite: 'None'})
 
             //Saving refreshToken with current user
             await User.doc(user.id).update({ "refreshToken": [...newRefreshTokenArray,newRefreshToken] })
-            res.cookie('jwt', newRefreshToken, { httpOnly: true/*, secure: true*/, maxAge: 24 * 60 * 60 * 1000 })
-            res.json({ roles,accessToken })
+            let id = user.id
+            res.cookie('jwt', newRefreshToken, { httpOnly: true, secure: true, maxAge: 24 * 60 * 60 * 1000, sameSite: 'None' })
+            res.json({id,roles,accessToken})
         } else {
             return res.sendStatus(401)
         }
@@ -75,14 +76,14 @@ module.exports = {
         return querySnapshot.docs.map(doc => Object.assign(doc.data(), { id: doc.id }))
       });
       if (users.length <= 0) {
-        res.clearCookie('jwt', { httpOnly: true/*, secure: true*/, sameSite: 'None'})
+        res.clearCookie('jwt', { httpOnly: true, secure: true, sameSite: 'None'})
         return res.sendStatus(204) //No content
       }
       const user = users[0];
 
       // Delete refreshToken in db
       await User.doc(user.id).update({ "refreshToken": user.refreshToken.filter(rt => rt !== refreshToken) })
-      res.clearCookie('jwt', { httpOnly: true/*, secure: true*/, sameSite: 'None'}) // secure: true - only serves on https
+      res.clearCookie('jwt', { httpOnly: true, secure: true, sameSite: 'None'}) // secure: true - only serves on https
       res.sendStatus(204)
     },
 
@@ -91,7 +92,7 @@ module.exports = {
       const cookies = req.cookies
       if(!cookies?.jwt) return res.sendStatus(401);
       const refreshToken = cookies.jwt;
-      res.clearCookie('jwt', { httpOnly: true/*, secure: true*/, sameSite: 'None' })
+      res.clearCookie('jwt', { httpOnly: true, secure: true, sameSite: 'None' })
     
       const users = await User.where("refreshToken", 'array-contains', refreshToken).get().then((querySnapshot) => {
         return querySnapshot.docs.map(doc => Object.assign(doc.data(), { id: doc.id }))
@@ -143,7 +144,7 @@ module.exports = {
               }
             },
             process.env.ACCESS_TOKEN_SECRET,
-            { expiresIn: '5m' }
+            { expiresIn: '1m' }
           )
           const newRefreshToken = jwt.sign(
               { "username": user.username },
@@ -152,8 +153,9 @@ module.exports = {
           )
           //Saving refreshToken with current user
           await User.doc(user.id).update({ "refreshToken": [...newRefreshTokenArray, newRefreshToken] })
-          res.cookie('jwt', newRefreshToken, { httpOnly: true/*, secure: true*/, maxAge: 24 * 60 * 60 * 1000 })
-          res.json({ roles,accessToken })
+          let id = user.id
+          res.cookie('jwt', newRefreshToken, { httpOnly: true, secure: true, maxAge: 24 * 60 * 60 * 1000, sameSite: 'None' })
+          res.json({ id,roles,accessToken })
         }
       )
     },
