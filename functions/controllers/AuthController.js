@@ -1,16 +1,8 @@
-const admin = require('firebase-admin');
-const config = require('../config/firebase.json')
-require('dotenv').config()
-admin.initializeApp({
-    credential: admin.credential.cert(config)
-});
-/* const admin = require('firebase-admin');
-admin.initializeApp(); */
-
+const db = require('../database');
 const bcrypt = require('bcrypt')
 const jwt = require('jsonwebtoken')
 
-const db = admin.firestore();
+
 const User = db.collection('users');
 module.exports = {
 
@@ -35,6 +27,7 @@ module.exports = {
             const accessToken = jwt.sign(
                 { "UserInfo": 
                   {
+                    "userId": user.id,
                     "username": user.username,
                     "roles": roles
                   }
@@ -109,14 +102,13 @@ module.exports = {
             const hackedUser = await User.where("username", "==", decoded.username).get().then((querySnapshot) => {
               return querySnapshot.docs.map(doc => Object.assign(doc.data(), { id: doc.id }))
             });
-            if(hackedUser.length <= 0){
+            if(hackedUser.length > 0){
               await User.doc(hackedUser[0].id).update({ "refreshToken": [] })
             }
           }
         )
         return res.sendStatus(403) //Forbidden
       }
-
       const user = users[0];
 
       const newRefreshTokenArray =  user.refreshToken.filter(rt => rt !== refreshToken);
@@ -139,12 +131,17 @@ module.exports = {
           const accessToken = jwt.sign(
             { "UserInfo": 
               {
-                "username": decoded.username,
+                "userId": user.id,
+                "username": user.username,
                 "roles": roles
               }
             },
             process.env.ACCESS_TOKEN_SECRET,
+<<<<<<< HEAD
             { expiresIn: '1m' }
+=======
+            { expiresIn: '1h' }
+>>>>>>> origin/main
           )
           const newRefreshToken = jwt.sign(
               { "username": user.username },
